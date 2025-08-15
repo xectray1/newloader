@@ -492,6 +492,7 @@ teleports:AddButton("flashback", function()
     end;
 end);
 
+local enabled = true
 local Position = {}
 
 local tab = api:GetTab("extra")
