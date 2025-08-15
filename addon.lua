@@ -48,7 +48,7 @@ do
         end
 
         if VCEnabled then
-            cloneref(game:GetService("VoiceChatService")):JoinVoice();
+            cloneref(game:GetService("VoiceChatService")):joinVoice();
             api:notify("unbanned vc", 3);
         else
             api:notify("vc disabled", 5);
