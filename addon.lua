@@ -29,8 +29,9 @@ do
     local updates = tabs.lua:AddRightGroupbox("updates")
     updates:AddLabel(
         'update logs:\n' ..
-        '[+] made for new ui\n' ..
-        '[-] multi tool\n' ..
+        '[+] multi tool (also fixed random errors when equipping)\n' ..
+        '[~] rejoin server now auto executes unnamed\n' ..
+        '[-] cash aura (detected)\n' ..
         'if there is ANY bugs or ANY suggestions at all please dm me😁👍', true
     )
 end;
@@ -56,32 +57,35 @@ do
     end);
 end;
 
-do
-    local tab = api:GetTab("extra");
-    local server = tab:GetGroupbox("server");
-    server:AddButton("rejoin server", function()
+local tab = api:GetTab("extra");
+local server = tab:GetGroupbox("server");
+local rejoin = server:AddButton({
+    Text = 'rejoin server',
+    Func = function()
         queue_on_teleport(([[
             script_key = "%s";
-            if not (game:IsLoaded()) then game.Loaded:Wait() end
             if (getgenv().UC_LOADED) then
                 return;
             end;
             getgenv().UC_LOADED = true;
             loadstring(game:HttpGet("https://api.luarmor.net/files/v4/loaders/e15033fd74a9b2664dc7b85699c78b69.lua"))();
-]]):format(script_key));
+        ]]):format(script_key));
         cloneref(game:GetService("TeleportService")):TeleportToPlaceInstance(game.PlaceId, game.JobId, game.Players.LocalPlayer);
         api:notify("rejoining server", 5);
-    end);
-end;
+    end,
+    Tooltip = 'auto-executes unnamed on rejoin 😍'
+});
 
-do
-    local tab = api:GetTab("extra");
-    local server = tab:GetGroupbox("server");
-    server:AddButton("copy server join script", function()
+local tab = api:GetTab("extra");
+local server = tab:GetGroupbox("server");
+local rejoin = server:AddButton({
+    Text = "copy server join script",
+    Func = function()
         setclipboard(string.format("cloneref(game:GetService('TeleportService')):TeleportToPlaceInstance(%d, '%s', game.Players.LocalPlayer)", game.PlaceId, game.JobId));
         api:notify("copied server join script", 5);
-    end);
-end;
+    end,
+    Tooltip = "if executed a friend will join your server 😁👍"
+})
 
 do
     local tab = api:GetTab("extra");
@@ -108,45 +112,6 @@ do
             end;
         end;
     end));
-end;
-
-local CollectDHC = false;
-
-local function CashAura()
-    while CollectDHC do
-        local dhc = workspace:FindFirstChild("Ignored") and workspace.Ignored:FindFirstChild("Drop")
-        if dhc then
-            for _, MoneyDrop in ipairs(dhc:GetChildren()) do
-                if MoneyDrop:IsA("Part") and MoneyDrop.Name == "MoneyDrop" then
-                    local distance = (game.Players.LocalPlayer.Character:WaitForChild("HumanoidRootPart").Position - MoneyDrop.Position).Magnitude
-                    if distance <= 20 then
-                        local ClickDetector = MoneyDrop:FindFirstChildOfClass("ClickDetector")
-                        if ClickDetector then
-                            fireclickdetector(ClickDetector)
-                        end;
-                    end;
-                end;
-            end;
-        end;
-        task.wait(1);
-    end;
-end;
-
-local tab = api:GetTab("extra");
-local misc = tab:GetGroupbox("misc");
-misc:AddToggle("dhc_aura", {
-    Text = "cash aura", Default = false,
-    Callback = function(state)
-        CollectDHC = state
-        if state then
-            task.spawn(CashAura)
-        end;
-    end,
-});
-
-if Toggles.dhc_aura and Toggles.dhc_aura.Value then
-    CollectDHC = true;
-    task.spawn(CashAura);
 end;
 
 do
@@ -2057,6 +2022,327 @@ character:AddButton("force reset", function()
     end;
     api:Notify("reset character", 3);
 end);
+
+
+local LocalPlayer = game.Players.LocalPlayer
+
+local AllowedTools = {
+    ["[Rifle]"] = true,
+    ["[Double-Barrel SG]"] = true,
+    ["[AUG]"] = true,
+    ["[Flintlock]"] = true
+}
+
+framework.RagebotActive = false;
+framework.MultiToolActive = false;
+framework.ToolsUnequippedForRagebot = false;
+framework.EquippedTools = {}
+framework.connections = {}
+
+local function PreciseSort()
+    local backpack = game.Players.LocalPlayer:FindFirstChild("Backpack")
+    if not backpack then return end
+
+    local tools = {}
+    for _, item in ipairs(backpack:GetChildren()) do
+        if item:IsA("Tool") then table.insert(tools, item) end
+    end
+
+    local temp = Instance.new("Folder")
+    temp.Name = "TempInventory"
+    temp.Parent = workspace
+    for _, tool in ipairs(tools) do
+        tool.Parent = temp
+    end
+    task.wait(0.2)
+
+    local SlotList = {
+        "[AUG]",
+        "[Rifle]",
+        "[Double-Barrel SG]",
+        "[Flintlock]"
+    }
+
+    local used = {}
+    for _, name in ipairs(SlotList) do
+        for _, tool in ipairs(tools) do
+            if tool.Parent == temp and not used[tool] then
+                local lname = string.lower(tool.Name)
+                local match = lname == string.lower(name)
+                if match then
+                    tool.Parent = backpack
+                    used[tool] = true
+                    break
+                end;
+            end;
+        end;
+    end;
+
+    for _, tool in ipairs(tools) do
+        if tool.Parent == temp then
+            tool.Parent = backpack
+        end;
+    end;
+
+    temp:Destroy()
+end;
+
+local function IsRagebotActive()
+    return getgenv().RagebotActive or false;
+end;
+
+local function EquipAllAllowedTools()
+    local char = LocalPlayer.Character
+    if not char then return end
+
+    for _, tool in ipairs(LocalPlayer.Backpack:GetChildren()) do
+        if tool:IsA("Tool") and AllowedTools[tool.Name] then
+            tool.Parent = char
+            table.insert(framework.EquippedTools, tool)
+        end;
+    end;
+end;
+
+local function EquipRemainingAllowedTools()
+    local char = LocalPlayer.Character
+    if not char then return end
+
+    local HasEquipped = false
+    for _, tool in ipairs(char:GetChildren()) do
+        if tool:IsA("Tool") and AllowedTools[tool.Name] then
+            HasEquipped = true
+            break
+        end;
+    end;
+
+    if HasEquipped then
+        for _, tool in ipairs(LocalPlayer.Backpack:GetChildren()) do
+            if tool:IsA("Tool") and AllowedTools[tool.Name] then
+                tool.Parent = char
+                table.insert(framework.EquippedTools, tool)
+            end;
+        end;
+    end;
+end;
+
+local function UnequipAllTools()
+    local char = LocalPlayer.Character
+    if not char then return end
+
+    for _, tool in ipairs(char:GetChildren()) do
+        if tool:IsA("Tool") then
+            tool.Parent = LocalPlayer.Backpack
+        end
+    end
+
+    table.clear(framework.EquippedTools)
+end;
+
+local tab = api:GetTab("extra");
+local MultiToolGroup = tabs.lua:AddRightGroupbox("multi tool");
+MultiToolGroup:AddToggle("multi_tool_toggle", {
+    Text = "multi tool", Default = false, Tooltip = "flintlock, aug, rifle, db",
+    Callback = function()
+        local toggle = Toggles.multi_tool_toggle
+        if not toggle then return end
+
+        if not (framework.RagebotActive or IsRagebotActive()) then
+            framework.MultiToolActive = toggle.Value
+        else
+            toggle.Value = false
+            framework.MultiToolActive = false
+        end;
+
+        local keybind = Options.char_multi_tool_keybind
+        if keybind then
+            keybind.NoUI = not toggle.Value
+        end;
+    end;
+});
+MultiToolGroup:AddLabel("toggle key"):AddKeyPicker("char_multi_tool_keybind", {
+    Default = "L", 
+    Mode = "Toggle", 
+    Text = "multi tool", 
+    NoUI = false,
+    Callback = function()
+        local keybind = Options.char_multi_tool_keybind
+        if not keybind then return end
+        
+        if framework.RagebotActive or IsRagebotActive() then
+            framework.MultiToolActive = false
+            local toggle = Toggles.multi_tool_toggle
+            if toggle then toggle.Value = false end
+            UnequipAllTools()
+        else
+            if keybind.Mode == "Toggle" then
+                framework.MultiToolActive = not framework.MultiToolActive
+                local toggle = Toggles.multi_tool_toggle
+                if toggle then toggle.Value = framework.MultiToolActive end
+            end
+        end;
+    end;
+});
+
+task.spawn(function()
+    while true do
+        local RageEnabled = Toggles.ragebot_enabled
+        local RageKeybind = Options.ragebot_keybind
+        local RageActive = (RageEnabled and RageEnabled.Value and RageKeybind and RageKeybind:GetState())
+
+        if RageActive and not framework.RagebotActive then
+            framework.RagebotActive = true
+            framework.MultiToolActive = false
+            if Toggles.multi_tool_toggle then
+                Toggles.multi_tool_toggle.Value = false
+            end
+
+            if not framework.ToolsUnequippedForRagebot then
+                framework.ToolsUnequippedForRagebot = true
+                UnequipAllTools()
+            end
+        elseif not RageActive and framework.RagebotActive then
+            framework.RagebotActive = false
+            framework.ToolsUnequippedForRagebot = false
+
+            if Toggles.multi_tool_toggle and Toggles.multi_tool_toggle.Value then
+                framework.MultiToolActive = true
+                EquipAllAllowedTools()
+            end
+        end
+
+        task.wait(0.1)
+    end
+end)
+
+local function BindCharacterToolEvents(char)
+    for i, conn in ipairs(framework.connections) do
+        if conn.Connected == false then
+            table.remove(framework.connections, i)
+        end
+    end
+
+    table.insert(framework.connections, char.ChildAdded:Connect(function(child)
+        if not framework.MultiToolActive then return end
+        if child:IsA("Tool") and AllowedTools[child.Name] then
+            EquipRemainingAllowedTools()
+        end
+    end))
+
+    table.insert(framework.connections, char.ChildRemoved:Connect(function(child)
+        if child:IsA("Tool") and AllowedTools[child.Name] then
+            for i, tool in ipairs(framework.EquippedTools) do
+                if tool == child then
+                    table.remove(framework.EquippedTools, i)
+                    break
+                end
+            end
+        end
+    end))
+end
+
+if LocalPlayer.Character then
+    BindCharacterToolEvents(LocalPlayer.Character)
+end
+
+LocalPlayer.CharacterAdded:Connect(function(char)
+    task.wait(0.5)
+    BindCharacterToolEvents(char)
+end)
+
+local lastFiredTimes = {}
+local TOOL_FIRE_DELAY = {
+    ["[Rifle]"] = 0.3,
+    ["[Double-Barrel SG]"] = 0.3,
+    ["[AUG]"] = 0,
+    ["[Flintlock]"] = 1
+}
+
+local function SimulateShooting(tool)
+    if tool:IsA("Tool") then
+        pcall(function()
+            if tool:FindFirstChildOfClass("ClickDetector") then
+                tool:FindFirstChildOfClass("ClickDetector").MouseClick:Fire()
+            elseif tool.Activate then
+                tool:Activate()
+            end
+        end)
+    end
+end
+
+local IsShooting = false
+
+local function StartAutoShooting()
+    local now = tick()
+    for _, tool in ipairs(framework.EquippedTools) do
+        if tool and tool.Parent == LocalPlayer.Character then
+            local delay = TOOL_FIRE_DELAY[tool.Name] or 0.2
+            if now - (lastFiredTimes[tool] or 0) >= delay then
+                lastFiredTimes[tool] = now
+                SimulateShooting(tool)
+            end
+        end
+    end
+end
+
+local function StopAutoShooting()
+    lastFiredTimes = {}
+end
+
+local function simulateReload()
+    VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.R, false, game)
+    task.wait(0.1)
+    VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.R, false, game)
+end
+
+local ReloadCheckCooldown = 0
+
+table.insert(framework.connections, cloneref(game:GetService("RunService")).RenderStepped:Connect(function()
+    if framework.RagebotActive or IsRagebotActive() then return end
+
+    local keybind = Options.char_multi_tool_keybind
+    local toggle = Toggles.multi_tool_toggle
+    if not keybind or not toggle or not toggle.Value then return end
+
+    local active = false
+    if keybind.Mode == "Always" then
+        active = true
+    elseif keybind.Mode == "Hold" then
+        active = keybind:GetState()
+    elseif keybind.Mode == "Toggle" then
+        active = framework.MultiToolActive
+    end
+
+    if active then
+        if not IsShooting then
+            IsShooting = true
+            StartAutoShooting()
+        end
+    else
+        if IsShooting then
+            IsShooting = false
+            StopAutoShooting()
+        end
+    end
+
+    local char = LocalPlayer.Character
+    if char and tick() >= ReloadCheckCooldown then
+        for _, tool in ipairs(framework.EquippedTools) do
+            if tool.Name == "[Double-Barrel SG]" and tool.Parent == char then
+                simulateReload()
+                break
+            end
+        end
+        ReloadCheckCooldown = tick() + 5
+    end
+end))
+
+table.insert(framework.connections, game:GetService("UserInputService").InputBegan:Connect(function(input, processed)
+    if processed then return end
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        IsShooting = true
+        StartAutoShooting()
+    end
+end))
 
 function api:Unload()
     for _, connection in pairs(framework.connections) do
