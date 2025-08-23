@@ -29,9 +29,8 @@ do
     local updates = tabs.lua:AddRightGroupbox("updates")
     updates:AddLabel(
         'update logs:\n' ..
-        '[+] multi tool (also fixed random errors when equipping)\n' ..
-        '[~] rejoin server now auto executes unnamed\n' ..
-        '[-] cash aura (detected)\n' ..
+        '[+] search whitelist player\n' ..
+        '[+] defense\n' ..
         'if there is ANY bugs or ANY suggestions at all please dm me😁👍', true
     )
 end;
@@ -152,6 +151,19 @@ do
     });
 end;
 
+do
+    local tab = api:GetTab("extra");
+    local defense = tab:GetGroupbox("misc");
+    defense:AddToggle("defensive_shot", {
+        Text = "defense", Default = false, Tooltip = "void on shot",
+        Callback = function()
+            api:on_event("localplayer_got_shot", function(player, part, tool, origin, position)
+                api:get_ui_object("character_prot_voidkeybind"):OverrideState(true);
+            end);
+        end;
+    });
+end;
+
 local tab = api:GetTab("extra");
 local misc = tab:GetGroupbox("misc");
 misc:AddToggle("anti_fling", {
@@ -203,6 +215,163 @@ table.insert(framework.connections, cloneref(game:GetService("RunService")).Hear
         end);
     end;
 end));
+
+local tab = api:GetTab("extra");
+local InputTab = tab:GetGroupbox("misc");
+local ClosestMatchLabel = InputTab:AddLabel("closest match: ");
+
+local LastPlayerName = nil
+
+local function FindClosestMatch(inputText)
+    local ClosestPlayerName = nil
+    local lowestDistance = math.huge
+    
+    local function LevenshteinDistance(s1, s2)
+        local len1 = #s1
+        local len2 = #s2
+        
+        local matrix = {}
+        for i = 0, len1 do
+            matrix[i] = {}
+            matrix[i][0] = i
+        end;
+        for j = 0, len2 do
+            matrix[0][j] = j
+        end;
+        
+        for i = 1, len1 do
+            for j = 1, len2 do
+                local cost = (s1:sub(i, i) == s2:sub(j, j)) and 0 or 1
+                matrix[i][j] = math.min(
+                    matrix[i - 1][j] + 1,
+                    matrix[i][j - 1] + 1,
+                    matrix[i - 1][j - 1] + cost
+                )
+            end;
+        end;
+        
+        return matrix[len1][len2]
+    end;
+
+    local players = game.Players:GetPlayers()
+    if #players == 0 then
+        return nil;
+    end;
+
+    for _, player in pairs(players) do
+        local name = player.Name and player.Name:lower() or ""
+        local DisplayName = player.DisplayName and player.DisplayName:lower() or ""
+        local SearchInput = inputText:lower()
+
+        if #name > 0 then
+            local nameDistance = LevenshteinDistance(SearchInput, name)
+            if nameDistance < lowestDistance then
+                lowestDistance = nameDistance
+                ClosestPlayerName = player.Name
+            end;
+        end;
+
+        if #DisplayName > 0 and DisplayName ~= name then
+            local DisplayNameDistance = LevenshteinDistance(SearchInput, DisplayName)
+            if DisplayNameDistance < lowestDistance then
+                lowestDistance = DisplayNameDistance
+                ClosestPlayerName = player.Name
+            end;
+        end;
+    end;
+
+    return ClosestPlayerName
+end;
+
+local PlayersTable = {}
+for _, player in pairs(game.Players:GetPlayers()) do
+    table.insert(PlayersTable, player.Name)
+end;
+
+local PlayerDropdown = InputTab:AddDropdown('select player', {
+    Values = PlayersTable,
+    Default = "",
+    Multi = false,
+    Text = 'select player',
+    Callback = function(value)
+        LastPlayerName = value
+        if value and value ~= "select a player..." then
+            ClosestMatchLabel:SetText("result: " .. value)
+        else
+            ClosestMatchLabel:SetText("result: nil")
+        end;
+    end;
+});
+
+local function UpdatePlayerDropdown()
+    local NewPlayers = {}
+    for _, player in pairs(game.Players:GetPlayers()) do
+        table.insert(NewPlayers, player.Name)
+    end;
+    PlayerDropdown:SetValues(NewPlayers)
+end;
+
+game.Players.PlayerAdded:Connect(function(player)
+    UpdatePlayerDropdown()
+end);
+
+game.Players.PlayerRemoving:Connect(function(player)
+    UpdatePlayerDropdown()
+end);
+
+local InputField = InputTab:AddInput("whitelist players", {
+    Default = "",
+    Numeric = false,
+    Finished = false,
+    Text = "whitelist player",
+    Tooltip = "for targetting not ragebot",
+    Placeholder = "kjittybong15",
+
+    Callback = function(value)
+        LastPlayerName = FindClosestMatch(value)
+        if LastPlayerName then
+            ClosestMatchLabel:SetText("closest match: " .. LastPlayerName)
+        else
+            ClosestMatchLabel:SetText("closest match: no match found.")
+        end;
+    end;
+});
+
+InputTab:AddButton({
+    Text = "whitelist player",
+    Func = function()
+        if not LastPlayerName then
+            return
+        end
+
+        if Options and Options.targeting_whitelist and Options.targeting_whitelist.Value then
+            local NewWhitelist = {}
+            for k, v in pairs(Options.targeting_whitelist.Value) do
+                NewWhitelist[k] = v
+            end;
+            NewWhitelist[LastPlayerName] = true
+            
+            Options.targeting_whitelist:SetValue(NewWhitelist)
+        end;
+    end;
+});
+
+InputTab:AddButton({
+    Text = "unwhitelist all",
+    Func = function()
+        local whitelist = Options.targeting_whitelist;
+        if whitelist and whitelist.Value and whitelist.SetValues then
+            local targets = whitelist.Value
+            local ClearedCount = 0
+            
+            for name, _ in pairs(targets) do
+                targets[name] = nil
+                ClearedCount = ClearedCount + 1
+            end;
+            whitelist:SetValues(targets)
+        end;
+    end
+});
 
 local CreateTool, RemoveTool
 local jerk = nil
