@@ -154,14 +154,14 @@ end;
 do
     local tab = api:GetTab("extra");
     local defense = tab:GetGroupbox("misc");
-    defense:AddToggle("defensive_shot", {
-        Text = "defense", Default = false, Tooltip = "void on shot",
-        Callback = function()
-            api:on_event("localplayer_got_shot", function(player, part, tool, origin, position)
-                api:get_ui_object("character_prot_voidkeybind"):OverrideState(true);
-            end);
-        end;
+    local defensive_toggle = defense:AddToggle("defensive_shot", {
+        Text = "defensive", Default = false;
     });
+    api:on_event("localplayer_got_shot", function(player, part, tool, origin, position)
+        if defensive_toggle.Value then
+            api:get_ui_object("character_prot_voidkeybind"):OverrideState(true);
+        end
+    end);
 end;
 
 local tab = api:GetTab("extra");
