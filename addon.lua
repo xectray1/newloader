@@ -31,6 +31,8 @@ do
         'update logs:\n' ..
         '[+] search whitelist player\n' ..
         '[+] defense\n' ..
+        '[~] fixed anti rpg\n' ..
+        '[~] better unload handling\n' ..
         'if there is ANY bugs or ANY suggestions at all please dm me😁👍', true
     )
 end;
@@ -155,7 +157,7 @@ do
     local tab = api:GetTab("extra");
     local defense = tab:GetGroupbox("misc");
     local defensive_toggle = defense:AddToggle("defensive_shot", {
-        Text = "defensive", Default = false;
+        Text = "defense", Default = false;
     });
     api:on_event("localplayer_got_shot", function(player, part, tool, origin, position)
         if defensive_toggle.Value then
@@ -218,8 +220,7 @@ end));
 
 local tab = api:GetTab("extra");
 local InputTab = tab:GetGroupbox("misc");
-local ClosestMatchLabel = InputTab:AddLabel("closest match: ");
-
+local ClosestMatchLabel = InputTab:AddLabel("result: ");
 local LastPlayerName = nil
 
 local function FindClosestMatch(inputText)
@@ -519,54 +520,56 @@ end));
 local tab = api:GetTab("extra");
 local troll = tab:GetGroupbox("troll");
 troll:AddToggle("anti_rpg", {
-    Text = "anti rpg", Default = false; }):OnChanged(function(v)
+    Text = "anti rpg", Default = false,
+}):OnChanged(function(v)
     framework.RPGActive = v
 end);
+
 local function find_first_child(obj, name)
     return obj and obj:FindFirstChild(name)
-end
-
+end;
 local function GetLauncher()
-    return find_first_child(workspace, "Ignored")
-    and find_first_child(workspace.Ignored, "Model")
-    and find_first_child(workspace.Ignored.Model, "Launcher")
+    return find_first_child(game.workspace, "Ignored")
+    and find_first_child(game.workspace.Ignored, "Model")
+    and find_first_child(game.workspace.Ignored.Model, "Launcher")
 end;
 local function IsLauncherNear()
-    local HRP = LocalPlayer.Character and find_first_child(LocalPlayer.Character, "HumanoidRootPart")
+    local HRP = game.Players.LocalPlayer.Character and find_first_child(game.Players.LocalPlayer.Character, "HumanoidRootPart")
     local Launcher = GetLauncher()
-    if not HRP or not Launcher then return false end
+    if not HRP or not Launcher then return false; end;
     return (Launcher.Position - HRP.Position).Magnitude < 20
 end;
 
-local position = nil;
+local LastPosition = nil;
+local voided = false;
 local void = false;
-local unvoid = false;
-local function VoidCharacter()
-    if unvoid then return end
-    unvoid = true;
-    
-    local char = LocalPlayer.Character
-    local hrp = char and find_first_child(char, "HumanoidRootPart")
-    if not hrp then return end
 
-    position = hrp.CFrame
-    hrp.CFrame = CFrame.new(0, -10000, 0)
+local function VoidCharacter()
+    if void then return end
     void = true;
     
+    local char = game.Players.LocalPlayer.Character
+    local hrp = char and find_first_child(char, "HumanoidRootPart")
+    if not hrp then return end
+    
+    LastPosition = hrp.CFrame
+    hrp.CFrame = CFrame.new(0, -10000, 0) 
+    voided = true;
+    
     task.delay(1, function()
-        if char and char:FindFirstChild("HumanoidRootPart") and position then
-            char.HumanoidRootPart.CFrame = position
+        if char and char:FindFirstChild("HumanoidRootPart") and LastPosition then
+            char.HumanoidRootPart.CFrame = LastPosition
         end;
-        void = false;
+        voided = false;
         task.delay(0.5, function()
-            unvoid = false;
+            void = false;
         end);
     end);
 end;
 
 table.insert(framework.connections, cloneref(game:GetService("RunService")).Heartbeat:Connect(function()
-    if not framework.antiRpgActive then return end
-    if IsLauncherNear() and not void then
+    if not framework.RPGActive then return end
+    if IsLauncherNear() and not voided then
         VoidCharacter()
     end;
 end));
@@ -2513,85 +2516,36 @@ table.insert(framework.connections, game:GetService("UserInputService").InputBeg
     end
 end))
 
-function api:Unload()
-    for _, connection in pairs(framework.connections) do
-        pcall(function() connection:Disconnect() end)
+local connection = api:on_event("unload", function()
+    for _, conn in pairs(framework.connections) do
+        if conn and typeof(conn) == "RBXScriptConnection" then
+            conn:Disconnect()
+        end
     end
-    table.clear(framework.connections)
+    framework.connections = {}
 
-for _, toggle in pairs(Toggles) do
-    if toggle.Name and (
-        toggle.Name == "anti_sit" or
-        toggle.Name == "auto_block" or
-        toggle.Name == "logs_toggle" or
-        toggle.Name == "anti_fling" or
-        toggle.Name == "target_hud_enabled" or
-        toggle.Name == "target_hud_opacity" or
-        toggle.Name == "jerk_toggle" or
-        toggle.Name == "trash_e" or
-        toggle.Name == "anti_rpg" or
-        toggle.Name == "sort_toggle" or
-        toggle.Name == "char_spin" or
-        toggle.Name == "no_jump_cd" or
-        toggle.Name == "dhc_aura" or
-        toggle.Name == "t_teleport"
-    ) then
-        toggle.Value = false
-    end;
-end;
+    for _, toggle in pairs(Toggles) do
+        if toggle and typeof(toggle.SetValue) == "function" then
+            toggle:SetValue(false)
+        end
+    end
 
-    if Options.char_spin_keybind then
-        Options.char_spin_keybind.NoUI = true
-    end;
-
-    if Options.char_multi_tool_keybind then
-        Options.char_multi_tool_keybind.NoUI = true
-    end;
-
-    if Options.sort_keybind then
-        Options.sort_keybind.NoUI = true
-    end;
-
-    if CollectDHC then
-        CollectDHC = false
-    end;
-
-    framework.MultiToolActive = false
-    framework.spinning = false
-    framework.antisitinactive = false
-    framework.antiFlingActive = false
-    framework.RPGActive = false
-    framework.IsHoldingKey = false
-
-    if game.Players.LocalPlayer.Character then
-        local humanoid = game.Players.LocalPlayer.Character:FindFirstChild("Humanoid")
+    local char = game.Players.LocalPlayer and game.Players.LocalPlayer.Character
+    if char then
+        local humanoid = char:FindFirstChildOfClass("Humanoid")
         if humanoid then
-            if framework.spinning then humanoid.AutoRotate = true end
-            if framework.antisitinactive then humanoid:SetStateEnabled(Enum.HumanoidStateType.Seated, true) end
+            humanoid:SetStateEnabled(Enum.HumanoidStateType.Seated, true)
         end
     end
 
-    position = nil
-    void = false
-    unvoid = false
-    IsShooting = false
-    table.clear(framework.EquippedTools)
-    table.clear(LastFiredTimes)
-
-    if framework.antifling then
-        for player, parts in pairs(collision) do
-            if player and player.Character then
-                for part, properties in pairs(parts) do
-                    if part and part:IsA("BasePart") then
-                        part.CanCollide = properties.CanCollide
-                        if part.Name == "Torso" then part.Massless = properties.Massless end
-                    end
-                end
-            end
-        end
-        table.clear(collision)
-    end
-end
+    framework.antiRpgActive = false
+    framework.antisitinactive = false
+    framework.spinning = false
+    framework.MultiToolActive = false
+    framework.IsHoldingKey = false
+    framework.EquippedTools = {}
+end)
+connection:Disconnect()
 pcall(framework.Init, framework)
 
 return framework
